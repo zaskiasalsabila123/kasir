@@ -1,11 +1,10 @@
 // 1. Impor module yang diperlukan dari firebase dan firestore
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js"
-
 import {
-getFirestore,
-onSnapshot,
-doc,
-setDoc,
+  getFirestore,
+  onSnapshot,
+  doc,
+  setDoc,
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
 import QRCode from "https://esm.sh/qrcode@1.5.3"
 
@@ -28,14 +27,23 @@ let totalHarga = 0
 let trxIdSekarang = ""
 let unsubscribeListener = null
 
+function bicara(teks) {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(teks);
+        utterance.lang = 'id-ID';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        window.speechSynthesis.speak(utterance);
+    }
+}
+
 // fungsi untuk tambah item ke keranjang 
 window.tambahKeKeranjang = function(nama, harga) {
-   // update total harga 
    totalHarga = totalHarga + harga
    document.getElementById('total-harga').innerText = `Rp.${totalHarga}`
-   
-   // mengaktifkan tombol qr
    document.getElementById('btn-bayar').disabled = false
+   bicara(`${nama} ditambahkan`)
 }
 
 // fungsi riset keranjang
@@ -44,42 +52,35 @@ window.resetKeranjang = function () {
   document.getElementById('total-harga').innerText = 'Rp. 0'
   document.getElementById('btn-bayar').disabled = true
   document.getElementById('qr-section').classList.add('hidden')
+  
+  // stop listener lama kalau ada
+  if (unsubscribeListener) {
+    unsubscribeListener()
+    unsubscribeListener = null
+  }
 }
 
 // fungsi membuat id transaksi qr code
 window.buatTransaksiQR = async function () {
-  // mencegah transaksi 0 rupiah
   if (totalHarga === 0) return
 
-  // buat identitas transaksi unik
   trxIdSekarang = "TRX-"+Math.floor(1000 + Math.random() * 9000)
   
-  // tampilkan identitas transaksi 
   document.getElementById('tx-id-display').innerText = trxIdSekarang
-  // tampilkan qr-section (membuang class hidden)
   document.getElementById('qr-section').classList.remove('hidden')
   
-  // reset tampilan status qr
   const statusBox = document.getElementById('status-box')
   statusBox.className = "status-box status-pending"
   document.getElementById('status-teks').innerText = "Menunggu scan..."
-  
-  // membuat qrcode jelas terlihat 
   document.getElementById('qr-canvas').style.opacity = 1
   
-  // render qr code ke canvas 
   const elemenCanvas = document.getElementById('qr-canvas')
   try {
-    await QRCode.toCanvas(elemenCanvas, trxIdSekarang, {
-       width: 140,
-       margin : 1
-    })
-    
-  }catch (error) {
-    console.log("Gagal membuat QR")
+    await QRCode.toCanvas(elemenCanvas, trxIdSekarang, { width: 140, margin : 1 })
+  } catch (error) {
+    console.log("Gagal membuat QR", error)
   }
   
-  // simpan document transaksi ke firestore
   const refTrx = doc(db,"transaksi",trxIdSekarang)
   try {
     await setDoc(refTrx, {
@@ -88,26 +89,31 @@ window.buatTransaksiQR = async function () {
       waktuBuat: Date.now()
     })
    } catch (error){
-     console.log("Gagal menyimpan transaksi ke firestore")
+     console.log("Gagal menyimpan transaksi ke firestore", error)
    }
    
    listenStatusPembayaran(trxIdSekarang)
 }
 
 // fungsi listener status pembayaran di firestore
-function listenStatusPembayaran(trxid) {
-  const refTrx = doc(db,"transaksi", trxid)
+function listenStatusPembayaran(trxId) {
+  const refTrx = doc(db,"transaksi", trxId)
   
-  const unsubscribeListener = onSnapshot(
-    refTrx,
-    (docSnapshot) => { 
+  // hentikan listener lama dulu
+  if (unsubscribeListener) unsubscribeListener()
+
+  unsubscribeListener = onSnapshot(refTrx, (docSnapshot) => { 
       if (docSnapshot.exists() && docSnapshot.data().status == 'terbayar') {
-        // tampilkan efek lunas
-        document.getElementById('status-box').className = "status-bos status-success"
-        document.getElementById('status-teks').innerText = "🎉LUNAS"
+        document.getElementById('status-box').className = "status-box status-success"
+        document.getElementById('status-teks').innerText = "🎉 LUNAS"
         document.getElementById('qr-canvas').style.opacity = "0.2"
         
-        unsubscribeListener()
+        bicara(`Pembayaran ${trxId} lunas, total ${totalHarga} rupiah`)
+        
+        if (unsubscribeListener) {
+          unsubscribeListener()
+          unsubscribeListener = null
+        }
       }
     }
   )
